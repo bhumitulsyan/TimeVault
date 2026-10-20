@@ -3,8 +3,8 @@
 import random
 from pathlib import Path
 
-from cowfs.metadata import MetadataDB
-from cowfs.object_store import ObjectStore
+from timevault.metadata import MetadataDB
+from timevault.object_store import ObjectStore
 
 
 def test_stress_1000_writes_versioning_and_dedup(tmp_path: Path) -> None:

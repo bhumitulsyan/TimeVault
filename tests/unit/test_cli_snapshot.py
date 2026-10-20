@@ -1,18 +1,18 @@
-"""Unit tests for `cowfs snapshot` CLI commands."""
+"""Unit tests for `timevault snapshot` CLI commands."""
 
 import json
 from pathlib import Path
 
 from typer.testing import CliRunner
 
-from cowfs.cli import app
-from cowfs.metadata import MetadataDB
-from cowfs.object_store import ObjectStore
+from timevault.cli import app
+from timevault.metadata import MetadataDB
+from timevault.object_store import ObjectStore
 
 
 def _init_storage(storage: Path) -> None:
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / ".cowfs").write_text(json.dumps({"version": 1, "hash_algo": "sha256"}))
+    (storage / ".timevault").write_text(json.dumps({"version": 1, "hash_algo": "sha256"}))
 
 
 def _seed_file(db: MetadataDB, store: ObjectStore, name: str, content: bytes) -> tuple[int, str]:

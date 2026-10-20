@@ -1,4 +1,4 @@
-"""Content-addressable object store for COWFS.
+"""Content-addressable object store for TimeVault.
 
 Stores immutable binary objects named by SHA-256 hash in a prefix-sharded
 directory structure (like git's .git/objects/).

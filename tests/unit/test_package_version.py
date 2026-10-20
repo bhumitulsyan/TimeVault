@@ -2,14 +2,14 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-import cowfs
+import timevault
 
 
 def test_dunder_version_matches_installed_distribution() -> None:
-    """`cowfs.__version__` should reflect installed distribution version."""
+    """`timevault.__version__` should reflect installed distribution version."""
     try:
-        dist_version = version("cowfs")
+        dist_version = version("timevault")
     except PackageNotFoundError:
-        assert cowfs.__version__ == "0.0.0+unknown"
+        assert timevault.__version__ == "0.0.0+unknown"
     else:
-        assert cowfs.__version__ == dist_version
+        assert timevault.__version__ == dist_version

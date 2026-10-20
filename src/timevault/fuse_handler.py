@@ -1,4 +1,4 @@
-"""COWFS FUSE handler — the core filesystem implementation.
+"""TimeVault FUSE handler — the core filesystem implementation.
 
 Uses pyfuse3 (Trio-based) with synchronous SQLite and async object I/O.
 """
@@ -14,10 +14,10 @@ from pathlib import Path
 import pyfuse3
 import trio
 
-from cowfs.metadata import MetadataDB
-from cowfs.object_store import ObjectStore
+from timevault.metadata import MetadataDB
+from timevault.object_store import ObjectStore
 
-log = logging.getLogger("cowfs.fuse")
+log = logging.getLogger("timevault.fuse")
 
 
 class FileHandle:
@@ -29,7 +29,7 @@ class FileHandle:
         self.dirty = False
 
 
-class COWFS(pyfuse3.Operations):
+class TimeVault(pyfuse3.Operations):
     """Copy-on-Write FUSE filesystem using pyfuse3 (Trio)."""
 
     def __init__(self, storage_root: str) -> None:

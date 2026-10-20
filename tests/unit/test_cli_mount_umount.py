@@ -6,7 +6,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from cowfs import cli
+from timevault import cli
 
 
 def test_mount_initializes_new_storage(tmp_path: Path, monkeypatch) -> None:

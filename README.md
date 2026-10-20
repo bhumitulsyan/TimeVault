@@ -1,4 +1,8 @@
-# COWFS - Copy-on-Write Filesystem
+# TimeVault
+
+TimeVault is built on [COWFS](https://github.com/atikulmunna/COW-Filesystem) by Atikul Islam Munna (MIT licence). See CHANGES_FROM_COWFS.md for what we changed.# TimeVault
+
+TimeVault is built on [COWFS](https://github.com/atikulmunna/COW-Filesystem) by Atikul Islam Munna (MIT licence). See CHANGES_FROM_COWFS.md for what we changed. COWFS - Copy-on-Write Filesystem
 
 [![PyPI](https://img.shields.io/pypi/v/cowfs)](https://pypi.org/project/cowfs/)
 

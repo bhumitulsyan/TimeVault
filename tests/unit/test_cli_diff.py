@@ -1,18 +1,18 @@
-"""Unit tests for `cowfs diff` CLI command."""
+"""Unit tests for `timevault diff` CLI command."""
 
 import json
 from pathlib import Path
 
 from typer.testing import CliRunner
 
-from cowfs.cli import app
-from cowfs.metadata import MetadataDB
-from cowfs.object_store import ObjectStore
+from timevault.cli import app
+from timevault.metadata import MetadataDB
+from timevault.object_store import ObjectStore
 
 
 def _init_storage(storage: Path) -> None:
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / ".cowfs").write_text(json.dumps({"version": 1, "hash_algo": "sha256"}))
+    (storage / ".timevault").write_text(json.dumps({"version": 1, "hash_algo": "sha256"}))
 
 
 def _seed_versions(storage: Path, versions: list[bytes]) -> tuple[int, list[str]]:
@@ -33,7 +33,7 @@ def _seed_versions(storage: Path, versions: list[bytes]) -> tuple[int, list[str]
 def test_diff_text_versions_json(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     _init_storage(storage)
-    _seed_versions(storage, [b"hello\nworld\n", b"hello\ncowfs\n"])
+    _seed_versions(storage, [b"hello\nworld\n", b"hello\ntimevault\n"])
 
     runner = CliRunner()
     result = runner.invoke(
@@ -44,7 +44,7 @@ def test_diff_text_versions_json(tmp_path: Path) -> None:
     assert payload["mode"] == "text"
     diff_blob = "\n".join(payload["diff"])
     assert "-world" in diff_blob
-    assert "+cowfs" in diff_blob
+    assert "+timevault" in diff_blob
 
 
 def test_diff_current_vs_version_json(tmp_path: Path) -> None:

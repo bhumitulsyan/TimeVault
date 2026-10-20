@@ -5,14 +5,14 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from cowfs import cli
-from cowfs.metadata import MetadataDB
-from cowfs.object_store import ObjectStore
+from timevault import cli
+from timevault.metadata import MetadataDB
+from timevault.object_store import ObjectStore
 
 
 def _init_storage(storage: Path) -> None:
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / ".cowfs").write_text(json.dumps({"version": 1, "hash_algo": "sha256"}))
+    (storage / ".timevault").write_text(json.dumps({"version": 1, "hash_algo": "sha256"}))
 
 
 def _seed_versions(storage: Path, name: str = "a.txt", payloads: list[bytes] | None = None) -> int:
@@ -124,14 +124,14 @@ def test_history_stats_diff_and_restore_error_branches(tmp_path: Path) -> None:
 def test_resolve_storage_env_and_normalize_path(tmp_path: Path, monkeypatch) -> None:
     storage = tmp_path / "storage"
     _init_storage(storage)
-    monkeypatch.setenv("COWFS_STORAGE", str(storage))
+    monkeypatch.setenv("TIMEVAULT_STORAGE", str(storage))
     resolved = cli._resolve_storage(None)
     assert resolved == storage.resolve()
     assert cli._normalize_file_path("a.txt") == "/a.txt"
     assert cli._normalize_file_path("/a.txt/") == "/a.txt"
-    monkeypatch.setenv("COWFS_STORAGE", str(tmp_path / "missing"))
+    monkeypatch.setenv("TIMEVAULT_STORAGE", str(tmp_path / "missing"))
     assert cli._resolve_storage(None) is None
-    monkeypatch.delenv("COWFS_STORAGE", raising=False)
+    monkeypatch.delenv("TIMEVAULT_STORAGE", raising=False)
     assert cli._resolve_storage(None) is None
 
 

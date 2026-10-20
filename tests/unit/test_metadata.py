@@ -1,10 +1,10 @@
-"""Unit tests for the COWFS metadata layer (SQLite)."""
+"""Unit tests for the TimeVault metadata layer (SQLite)."""
 
 from pathlib import Path
 
 import pytest
 
-from cowfs.metadata import MetadataDB
+from timevault.metadata import MetadataDB
 
 
 @pytest.fixture

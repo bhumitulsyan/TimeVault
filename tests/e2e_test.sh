@@ -1,9 +1,9 @@
 #!/bin/bash
-# End-to-end test for COWFS
+# End-to-end test for TimeVault
 set -o pipefail
-VENV="/home/munna/projects/cowfs/.venv/bin"
-STORAGE="/tmp/cowfs_e2e_storage"
-MOUNT="/tmp/cowfs_e2e_mnt"
+VENV="$(cd "$(dirname "$0")/.." && pwd)/.venv/bin"
+STORAGE="/tmp/timevault_e2e_storage"
+MOUNT="/tmp/timevault_e2e_mnt"
 PASS=0
 FAIL=0
 
@@ -41,8 +41,8 @@ cleanup 2>/dev/null
 mkdir -p "$STORAGE" "$MOUNT"
 
 # Mount
-$VENV/cowfs mount "$STORAGE" "$MOUNT" &>/dev/null &
-COWFS_PID=$!
+$VENV/timevault mount "$STORAGE" "$MOUNT" &>/dev/null &
+TimeVault_PID=$!
 sleep 2
 
 # Verify mounted
@@ -56,8 +56,8 @@ else
 fi
 
 # Test 1: Create and read a file
-echo "hello cowfs" > "$MOUNT/test.txt"
-assert_eq "write/read file" "hello cowfs" "$(cat "$MOUNT/test.txt")"
+echo "hello timevault" > "$MOUNT/test.txt"
+assert_eq "write/read file" "hello timevault" "$(cat "$MOUNT/test.txt")"
 
 # Test 2: Create a directory
 assert_ok "mkdir" mkdir "$MOUNT/subdir"
@@ -94,17 +94,17 @@ LS_EMPTY=$(ls "$MOUNT/" 2>/dev/null)
 assert_eq "empty root" "" "$LS_EMPTY"
 
 # Check process is still alive
-if kill -0 $COWFS_PID 2>/dev/null; then
-    echo "PASS: cowfs process survived all operations"
+if kill -0 $TimeVault_PID 2>/dev/null; then
+    echo "PASS: timevault process survived all operations"
     PASS=$((PASS + 1))
 else
-    echo "FAIL: cowfs process crashed"
+    echo "FAIL: timevault process crashed"
     FAIL=$((FAIL + 1))
 fi
 
 # Unmount
 fusermount3 -u "$MOUNT"
-wait $COWFS_PID 2>/dev/null || true
+wait $TimeVault_PID 2>/dev/null || true
 echo "PASS: unmounted cleanly"
 PASS=$((PASS + 1))
 

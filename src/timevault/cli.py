@@ -1,4 +1,4 @@
-"""COWFS CLI — companion command-line tool for the COW filesystem."""
+"""TimeVault CLI — companion command-line tool for the COW filesystem."""
 
 import difflib
 import importlib.util
@@ -18,16 +18,16 @@ from rich.console import Console
 from rich.table import Table
 
 app = typer.Typer(
-    name="cowfs",
-    help="COWFS — Copy-on-Write Filesystem Manager",
+    name="timevault",
+    help="TimeVault — Copy-on-Write Filesystem Manager",
     no_args_is_help=True,
 )
 snapshot_app = typer.Typer(help="Manage filesystem snapshots")
 app.add_typer(snapshot_app, name="snapshot")
 console = Console()
 
-FORMAT_MARKER_FILE = ".cowfs"
-LOCK_FILE = ".cowfs.lock"
+FORMAT_MARKER_FILE = ".timevault"
+LOCK_FILE = ".timevault.lock"
 FORMAT_VERSION = 1
 
 
@@ -63,7 +63,7 @@ def _acquire_lock(storage_dir: Path) -> int:
     except OSError as e:
         os.close(fd)
         console.print(
-            f"[red]Error:[/red] Another COWFS instance is already mounted "
+            f"[red]Error:[/red] Another TimeVault instance is already mounted "
             f"on [bold]{storage_dir}[/bold]"
         )
         raise typer.Exit(1) from e
@@ -83,15 +83,15 @@ def _release_lock(fd: int) -> None:
 @app.command()
 def mount(
     storage_dir: str = typer.Argument(..., help="Storage backend directory"),
-    mount_point: str = typer.Argument(..., help="Directory to mount COWFS at"),
+    mount_point: str = typer.Argument(..., help="Directory to mount TimeVault at"),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
     auto_snapshot: bool = typer.Option(False, "--auto-snapshot"),
     hash_algo: str = typer.Option("sha256", "--hash-algo"),
 ) -> None:
-    """Mount the COWFS filesystem."""
+    """Mount the TimeVault filesystem."""
     if platform.system() != "Linux":
         console.print(
-            "[red]Error:[/red] COWFS mount is supported on Linux only. "
+            "[red]Error:[/red] TimeVault mount is supported on Linux only. "
             "Use WSL2 (Ubuntu) on Windows."
         )
         raise typer.Exit(1)
@@ -120,15 +120,15 @@ def mount(
     if not storage_path.exists():
         storage_path.mkdir(parents=True)
         _write_format_marker(storage_path, hash_algo)
-        console.print(f"Initialized new COWFS storage at [bold]{storage_path}[/bold]")
+        console.print(f"Initialized new TimeVault storage at [bold]{storage_path}[/bold]")
     else:
         marker = _read_format_marker(storage_path)
         if marker is None:
             if not any(storage_path.iterdir()):
                 _write_format_marker(storage_path, hash_algo)
-                console.print(f"Initialized new COWFS storage at [bold]{storage_path}[/bold]")
+                console.print(f"Initialized new TimeVault storage at [bold]{storage_path}[/bold]")
             else:
-                console.print(f"[red]Error:[/red] {storage_path} is not a valid COWFS storage")
+                console.print(f"[red]Error:[/red] {storage_path} is not a valid TimeVault storage")
                 raise typer.Exit(1)
         else:
             if marker.get("version", 0) > FORMAT_VERSION:
@@ -153,26 +153,26 @@ def mount(
         console.print("\n[yellow]Caught interrupt, unmounting...[/yellow]")
     finally:
         _release_lock(lock_fd)
-        console.print("[green]COWFS unmounted.[/green]")
+        console.print("[green]TimeVault unmounted.[/green]")
 
 
 async def _run_fuse(storage_path: Path, mount_path: Path, debug: bool) -> None:
     import pyfuse3
 
-    from cowfs.fuse_handler import COWFS
+    from timevault.fuse_handler import TimeVault
 
-    fs = COWFS(str(storage_path))
+    fs = TimeVault(str(storage_path))
     fs.init()
 
     fuse_options = set(pyfuse3.default_options)
-    fuse_options.add("fsname=cowfs")
+    fuse_options.add("fsname=timevault")
     if debug:
         fuse_options.add("debug")
 
     pyfuse3.init(fs, str(mount_path), fuse_options)
 
     console.print(
-        f"[green]COWFS mounted:[/green] [bold]{storage_path}[/bold] → [bold]{mount_path}[/bold]"
+        f"[green]TimeVault mounted:[/green] [bold]{storage_path}[/bold] → [bold]{mount_path}[/bold]"
     )
     console.print("Press Ctrl+C to unmount")
 
@@ -187,7 +187,7 @@ async def _run_fuse(storage_path: Path, mount_path: Path, debug: bool) -> None:
 def umount(
     mount_point: str = typer.Argument(..., help="Mount point to unmount"),
 ) -> None:
-    """Unmount the COWFS filesystem."""
+    """Unmount the TimeVault filesystem."""
     mount_path = Path(mount_point).resolve()
     for cmd in [["fusermount3", "-u"], ["fusermount", "-u"]]:
         try:
@@ -217,7 +217,7 @@ def restore(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Restore a file to a previous version."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     if (version is None) == (before is None):
         console.print("[red]Error:[/red] Provide exactly one of --version or --before")
@@ -311,7 +311,7 @@ def history(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Show version history of a file."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -373,7 +373,7 @@ def log(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Show chronological activity feed across files and snapshots."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -447,8 +447,8 @@ def diff(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Show diff between file versions."""
-    from cowfs.metadata import MetadataDB
-    from cowfs.object_store import ObjectStore
+    from timevault.metadata import MetadataDB
+    from timevault.object_store import ObjectStore
 
     by_pair = v1 is not None or v2 is not None
     by_current = version is not None
@@ -555,7 +555,7 @@ def stats(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Show storage statistics."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -581,7 +581,7 @@ def stats(
             s["hash_algo"] = hash_algo
             console.print_json(json.dumps(s))
         else:
-            console.print("[bold]COWFS Storage Statistics[/bold]")
+            console.print("[bold]TimeVault Storage Statistics[/bold]")
             console.print(f"  Hash algorithm:   {hash_algo}")
             console.print(f"  Logical size:     {_human_size(s['logical_size_bytes'])}")
             console.print(f"  Actual size:      {_human_size(s['actual_size_bytes'])}")
@@ -603,8 +603,8 @@ def gc_command(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Collect unreferenced objects from storage."""
-    from cowfs.metadata import MetadataDB
-    from cowfs.object_store import ObjectStore
+    from timevault.metadata import MetadataDB
+    from timevault.object_store import ObjectStore
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -733,7 +733,7 @@ def snapshot_create(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Create a named filesystem snapshot."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -772,7 +772,7 @@ def snapshot_list(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """List snapshots."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -821,7 +821,7 @@ def snapshot_delete(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Delete a snapshot."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -853,7 +853,7 @@ def snapshot_show(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Show files captured in a snapshot."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -911,7 +911,7 @@ def snapshot_restore(
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Restore filesystem state to a snapshot."""
-    from cowfs.metadata import MetadataDB
+    from timevault.metadata import MetadataDB
 
     storage_path = _resolve_storage(storage_dir)
     if storage_path is None:
@@ -989,7 +989,7 @@ def _resolve_storage(storage_dir: str | None) -> Path | None:
         if p.exists() and (p / FORMAT_MARKER_FILE).exists():
             return p
         return None
-    env = os.environ.get("COWFS_STORAGE")
+    env = os.environ.get("TIMEVAULT_STORAGE")
     if env:
         p = Path(env).resolve()
         if p.exists() and (p / FORMAT_MARKER_FILE).exists():

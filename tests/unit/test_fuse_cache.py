@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cowfs.fuse_handler import COWFS
+from timevault.fuse_handler import TimeVault
 
 
 def test_hash_cache_refreshes_after_external_restore(tmp_path: Path) -> None:
@@ -12,7 +12,7 @@ def test_hash_cache_refreshes_after_external_restore(tmp_path: Path) -> None:
     pytest.importorskip("pyfuse3")
 
     storage = tmp_path / "storage"
-    fs = COWFS(str(storage))
+    fs = TimeVault(str(storage))
     fs.init()
     try:
         inode = fs.db.create_file(parent_id=1, name="x.txt", path="/x.txt")

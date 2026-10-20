@@ -1,4 +1,4 @@
-"""SQLite metadata layer for COWFS.
+"""SQLite metadata layer for TimeVault.
 
 Manages all metadata: files (inodes), versions, objects, snapshots.
 Uses synchronous sqlite3 — pyfuse3 runs on Trio, and SQLite on local disk
@@ -98,7 +98,7 @@ INSERT INTO format_version (version) SELECT 1
 
 
 class MetadataDB:
-    """Synchronous SQLite wrapper for COWFS metadata operations."""
+    """Synchronous SQLite wrapper for TimeVault metadata operations."""
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path

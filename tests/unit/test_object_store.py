@@ -1,11 +1,11 @@
-"""Unit tests for the COWFS object store."""
+"""Unit tests for the TimeVault object store."""
 
 from pathlib import Path
 
 import pytest
 import trio
 
-from cowfs.object_store import ObjectStore
+from timevault.object_store import ObjectStore
 
 
 @pytest.fixture

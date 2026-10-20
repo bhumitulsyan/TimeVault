@@ -1,1 +1,1 @@
-"""Shared test fixtures for COWFS tests."""
+"""Shared test fixtures for TimeVault tests."""
