@@ -22,12 +22,16 @@ log = logging.getLogger("timevault.fuse")
 
 
 class FileHandle:
-    __slots__ = ("dirty", "flags", "inode")
+    __slots__ = ("dirty", "flags", "inode", "written")
 
     def __init__(self, inode: int, flags: int) -> None:
         self.inode = inode
         self.flags = flags
         self.dirty = False
+        # True once write() was called since the last version was saved. A close()
+        # before any write (shells do this when redirecting output) must not save
+        # a half-done, usually empty, version.
+        self.written = False
 
 
 class TimeVault(pyfuse3.Operations):
@@ -227,9 +231,19 @@ class TimeVault(pyfuse3.Operations):
             raise pyfuse3.FUSEError(errno.EISDIR)
 
         fh = self._alloc_fh(inode, flags)
+
+        if flags & os.O_TRUNC:
+            # "Empty the file first" (e.g. `echo hi > file`). Without this, writing
+            # shorter content left the end of the old content in the file.
+            lock = self._get_inode_lock(inode)
+            with lock:
+                self._write_buffers[inode] = bytearray()
+            self._file_handles[fh].dirty = True
+
         fi = pyfuse3.FileInfo()
         fi.fh = fh
-        fi.keep_cache = True
+        # A truncated file's old pages in the kernel cache are no longer valid.
+        fi.keep_cache = not (flags & os.O_TRUNC)
         return fi
 
     async def create(self, parent_inode, name, mode, flags, ctx):
@@ -256,9 +270,8 @@ class TimeVault(pyfuse3.Operations):
             gid=ctx.gid,
         )
 
-        empty_hash = self.objects.store_sync(b"")
-        self.db.create_version(inode, empty_hash, 0)
-
+        # No version yet: the first real save creates version 1. An empty file
+        # that is closed without writing still gets one empty version (on release).
         self._write_buffers[inode] = bytearray()
 
         fh = self._alloc_fh(inode, flags)
@@ -303,6 +316,7 @@ class TimeVault(pyfuse3.Operations):
                 data.extend(b"\x00" * (end - len(data)))
             data[offset:end] = buf
             handle.dirty = True
+            handle.written = True
 
         return len(buf)
 
@@ -315,6 +329,11 @@ class TimeVault(pyfuse3.Operations):
             new_data = bytes(self._write_buffers.pop(inode))
 
         obj_hash = self.objects.store_sync(new_data)
+        current = self.db.get_current_version(inode)
+        if current is not None and current["object_hash"] == obj_hash:
+            # Saved again with identical content: nothing changed, no new version.
+            log.debug("flush: inode=%d unchanged, no new version", inode)
+            return
         self.db.create_version(inode, obj_hash, len(new_data))
 
         self._inode_hash_cache[inode] = obj_hash
@@ -323,10 +342,15 @@ class TimeVault(pyfuse3.Operations):
 
     async def flush(self, fh):
         handle = self._get_fh(fh)
-        log.debug("flush(inode=%d, dirty=%s)", handle.inode, handle.dirty)
-        if handle.dirty:
+        log.debug(
+            "flush(inode=%d, dirty=%s, written=%s)", handle.inode, handle.dirty, handle.written
+        )
+        # Save a version only if data was written. A dirty-but-unwritten handle
+        # (truncated, nothing written yet) is saved on release if it stays that way.
+        if handle.dirty and handle.written:
             await trio.to_thread.run_sync(self._flush_inode_sync, handle.inode)
             handle.dirty = False
+            handle.written = False
 
     async def fsync(self, fh, datasync):
         handle = self._get_fh(fh)
@@ -334,6 +358,7 @@ class TimeVault(pyfuse3.Operations):
         if handle.dirty:
             await trio.to_thread.run_sync(self._flush_inode_sync, handle.inode)
             handle.dirty = False
+            handle.written = False
 
     async def release(self, fh):
         handle = self._get_fh(fh)
