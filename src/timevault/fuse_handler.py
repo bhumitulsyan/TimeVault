@@ -4,6 +4,7 @@ Uses pyfuse3 (Trio-based) with synchronous SQLite and async object I/O.
 """
 
 import errno
+import functools
 import logging
 import os
 import stat
@@ -43,6 +44,7 @@ class TimeVault(pyfuse3.Operations):
         self._file_handles: dict[int, FileHandle] = {}
         self._dir_handles: dict[int, int] = {}  # fh → inode for opendir
         self._next_fh: int = 1
+        self.error_count: int = 0  # operations that failed unexpectedly (see crash guard)
 
         # Cache: inode → (object_hash, size)
         self._inode_hash_cache: dict[int, str] = {}
@@ -483,3 +485,41 @@ class TimeVault(pyfuse3.Operations):
 
     async def removexattr(self, inode, name, ctx):
         raise pyfuse3.FUSEError(errno.ENOTSUP)
+
+
+# ──────────────── Crash guard ────────────────
+#
+# pyfuse3 stops the whole filesystem if an operation raises anything other
+# than FUSEError. One bad call (a database error, a missing object file) would
+# then unmount the vault, and every later write would go unrecorded. Instead,
+# log the error, undo the half-finished database changes, and fail only that
+# one call with EIO ("input/output error").
+
+_GUARDED_OPS = (
+    "lookup", "getattr", "setattr", "opendir", "releasedir", "readdir",
+    "open", "create", "read", "write", "flush", "fsync", "release",
+    "unlink", "mkdir", "rmdir", "rename", "statfs",
+)
+
+
+def _guard(name: str, fn):
+    @functools.wraps(fn)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await fn(self, *args, **kwargs)
+        except pyfuse3.FUSEError:
+            raise
+        except Exception:
+            log.exception("%s failed; returning EIO and keeping the vault mounted", name)
+            try:
+                self.db.rollback()
+            except Exception:
+                log.exception("rollback after %s failure also failed", name)
+            self.error_count += 1
+            raise pyfuse3.FUSEError(errno.EIO) from None
+
+    return wrapper
+
+
+for _name in _GUARDED_OPS:
+    setattr(TimeVault, _name, _guard(_name, getattr(TimeVault, _name)))
