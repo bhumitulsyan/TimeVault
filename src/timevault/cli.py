@@ -8,7 +8,7 @@ import os
 import platform
 import sqlite3
 import subprocess
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -254,7 +254,7 @@ def restore(
         else:
             before_dt = _parse_datetime(before)
             target = db.get_latest_version_before(
-                file_row["id"], before_dt.strftime("%Y-%m-%d %H:%M:%S")
+                file_row["id"], _to_db_time(before_dt)
             )
             if target is None:
                 console.print(f"[red]Error:[/red] No version found before {before}")
@@ -353,7 +353,7 @@ def history(
                 marker = " *" if v["id"] == current_vid else ""
                 table.add_row(
                     f"{i}{marker}",
-                    v["created_at"],
+                    _display_time(v["created_at"]),
                     _human_size(v["size_bytes"]),
                     v["object_hash"][:12] + "...",
                 )
@@ -386,9 +386,9 @@ def log(
         since_sql = None
         until_sql = None
         if since is not None:
-            since_sql = _parse_datetime(since).strftime("%Y-%m-%d %H:%M:%S")
+            since_sql = _to_db_time(_parse_datetime(since))
         if until is not None:
-            until_sql = _parse_datetime(until).strftime("%Y-%m-%d %H:%M:%S")
+            until_sql = _to_db_time(_parse_datetime(until))
         if since_sql is not None and until_sql is not None and since_sql > until_sql:
             console.print("[red]Error:[/red] --since must be earlier than or equal to --until")
             raise typer.Exit(1)
@@ -424,7 +424,7 @@ def log(
             version = str(row["version_id"]) if row["version_id"] is not None else "-"
             short_hash = (row["object_hash"][:12] + "...") if row["object_hash"] else "-"
             table.add_row(
-                row["created_at"],
+                _display_time(row["created_at"]),
                 row["action"],
                 row["path"] or "-",
                 version,
@@ -624,7 +624,7 @@ def gc_command(
         before_sql: str | None = None
         if before is not None:
             before_dt = _parse_datetime(before)
-            before_sql = before_dt.strftime("%Y-%m-%d %H:%M:%S")
+            before_sql = _to_db_time(before_dt)
             if dry_run:
                 pruned_rows = db.list_prunable_versions_before(before_sql)
             else:
@@ -805,7 +805,7 @@ def snapshot_list(
         for s in snapshots:
             table.add_row(
                 s["name"],
-                s["created_at"],
+                _display_time(s["created_at"]),
                 str(s["file_count"]),
                 s["description"] or "",
             )
@@ -895,7 +895,7 @@ def snapshot_show(
                 str(e["version_id"]),
                 _human_size(e["size_bytes"]),
                 e["object_hash"][:12] + "...",
-                e["created_at"],
+                _display_time(e["created_at"]),
             )
         console.print(table)
     finally:
@@ -1017,6 +1017,30 @@ def _parse_datetime(value: str | None) -> datetime:
             raise typer.BadParameter(
                 f"Invalid datetime '{value}'. Use ISO format like '2026-02-23T10:02:00'."
             ) from e
+
+
+def _to_db_time(dt: datetime) -> str:
+    """Convert a user-supplied time to the UTC text stored in the database.
+
+    A time typed without a timezone is the user's local time (what they see
+    on their clock), not UTC.
+    """
+    from timevault.metadata import TIME_FORMAT
+
+    if dt.tzinfo is None:
+        dt = dt.astimezone()  # attach the local timezone
+    return dt.astimezone(UTC).strftime(TIME_FORMAT)
+
+
+def _display_time(stored: str | None) -> str:
+    """Show a stored UTC timestamp in local time, to the millisecond."""
+    if not stored:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(stored).replace(tzinfo=UTC)
+    except ValueError:
+        return stored
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
 def _is_binary(data: bytes) -> bool:

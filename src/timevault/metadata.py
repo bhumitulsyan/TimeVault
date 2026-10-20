@@ -6,14 +6,26 @@ is fast enough that thread offloading is only needed for bulk operations.
 """
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
+
+# Timestamps are stored as UTC text with microseconds, e.g. "2026-10-21 01:20:05.123456".
+# Text in this format sorts in time order, and older rows stored without the
+# fraction ("2026-10-21 01:20:05") still sort correctly among the new ones.
+TIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+
+
+def utc_now_text() -> str:
+    """Current UTC time in TIME_FORMAT (available inside SQL as tv_now())."""
+    return datetime.now(UTC).strftime(TIME_FORMAT)
+
 
 SCHEMA_SQL = """
 -- Format version tracking (checked on mount)
 CREATE TABLE IF NOT EXISTS format_version (
     version INTEGER NOT NULL DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
 );
 
 -- Logical files (paths in the mounted filesystem)
@@ -28,8 +40,8 @@ CREATE TABLE IF NOT EXISTS files (
     mode INTEGER DEFAULT 33188,
     uid INTEGER DEFAULT 0,
     gid INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+    updated_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
 );
 
 -- Version history per file
@@ -38,7 +50,7 @@ CREATE TABLE IF NOT EXISTS versions (
     file_id INTEGER NOT NULL REFERENCES files(id),
     object_hash TEXT NOT NULL,
     size_bytes INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
     is_deleted BOOLEAN DEFAULT FALSE,
     FOREIGN KEY (object_hash) REFERENCES objects(hash)
 );
@@ -48,7 +60,7 @@ CREATE TABLE IF NOT EXISTS objects (
     hash TEXT PRIMARY KEY,
     size_bytes INTEGER NOT NULL,
     ref_count INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
 );
 
 -- Named filesystem snapshots
@@ -56,7 +68,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
     description TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
 );
 
 -- Maps each snapshot to the version of each file at snapshot time
@@ -74,7 +86,7 @@ CREATE TABLE IF NOT EXISTS events (
     path TEXT,
     version_id INTEGER,
     object_hash TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
 );
 
 -- Performance indexes
@@ -110,6 +122,7 @@ class MetadataDB:
     def connect(self) -> None:
         self.db = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.db.create_function("tv_now", 0, utc_now_text)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA synchronous=NORMAL")
@@ -157,8 +170,8 @@ class MetadataDB:
                     mode INTEGER DEFAULT 33188,
                     uid INTEGER DEFAULT 0,
                     gid INTEGER DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')),
+                    updated_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
                 );
                 INSERT INTO files_new SELECT
                     id, parent_id, name, path, is_dir, current_version_id, is_deleted,
@@ -252,8 +265,9 @@ class MetadataDB:
     ) -> int:
         assert self.db is not None
         cursor = self.db.execute(
-            """INSERT INTO files (parent_id, name, path, is_dir, mode, uid, gid)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO files (parent_id, name, path, is_dir, mode, uid, gid,
+                                   created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, tv_now(), tv_now())""",
             (parent_id, name, path, is_dir, mode, uid, gid),
         )
         self.db.commit()
@@ -271,7 +285,7 @@ class MetadataDB:
         file_row = self.get_file(inode)
         path = file_row["path"] if file_row is not None else None
         self.db.execute(
-            "UPDATE files SET is_deleted = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE files SET is_deleted = TRUE, updated_at = tv_now() WHERE id = ?",
             (inode,),
         )
         self.record_event(action, path=path, commit=False)
@@ -292,7 +306,7 @@ class MetadataDB:
                 if clash is not None:
                     self.soft_delete_file(clash["id"], commit=False, action="REPLACED")
         self.db.execute(
-            "UPDATE files SET is_deleted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE files SET is_deleted = ?, updated_at = tv_now() WHERE id = ?",
             (is_deleted, inode),
         )
         if commit:
@@ -310,13 +324,13 @@ class MetadataDB:
 
         self.db.execute(
             """UPDATE files SET parent_id = ?, name = ?, path = ?,
-               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+               updated_at = tv_now() WHERE id = ?""",
             (new_parent_id, new_name, new_path, inode),
         )
         if is_dir:
             self.db.execute(
                 """UPDATE files SET path = ? || substr(path, ?),
-                   updated_at = CURRENT_TIMESTAMP
+                   updated_at = tv_now()
                    WHERE path LIKE ? || '/%'""",
                 (new_path, len(old_path) + 1, old_path),
             )
@@ -332,17 +346,17 @@ class MetadataDB:
         assert self.db is not None
         if mode is not None:
             self.db.execute(
-                "UPDATE files SET mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE files SET mode = ?, updated_at = tv_now() WHERE id = ?",
                 (mode, inode),
             )
         if uid is not None:
             self.db.execute(
-                "UPDATE files SET uid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE files SET uid = ?, updated_at = tv_now() WHERE id = ?",
                 (uid, inode),
             )
         if gid is not None:
             self.db.execute(
-                "UPDATE files SET gid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE files SET gid = ?, updated_at = tv_now() WHERE id = ?",
                 (gid, inode),
             )
         self.db.commit()
@@ -350,7 +364,7 @@ class MetadataDB:
     def set_current_version(self, inode: int, version_id: int) -> None:
         assert self.db is not None
         self.db.execute(
-            "UPDATE files SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE files SET current_version_id = ?, updated_at = tv_now() WHERE id = ?",
             (version_id, inode),
         )
         self.db.commit()
@@ -368,20 +382,20 @@ class MetadataDB:
     ) -> int:
         assert self.db is not None
         self.db.execute(
-            """INSERT INTO objects (hash, size_bytes, ref_count)
-               VALUES (?, ?, 1)
+            """INSERT INTO objects (hash, size_bytes, ref_count, created_at)
+               VALUES (?, ?, 1, tv_now())
                ON CONFLICT(hash) DO UPDATE SET ref_count = ref_count + 1""",
             (object_hash, size_bytes),
         )
         cursor = self.db.execute(
-            """INSERT INTO versions (file_id, object_hash, size_bytes)
-               VALUES (?, ?, ?)""",
+            """INSERT INTO versions (file_id, object_hash, size_bytes, created_at)
+               VALUES (?, ?, ?, tv_now())""",
             (file_id, object_hash, size_bytes),
         )
         version_id = cursor.lastrowid
         assert version_id is not None
         self.db.execute(
-            "UPDATE files SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE files SET current_version_id = ?, updated_at = tv_now() WHERE id = ?",
             (version_id, file_id),
         )
         file_row = self.get_file(file_id)
@@ -540,7 +554,7 @@ class MetadataDB:
     def create_snapshot(self, name: str, description: str | None = None) -> int:
         assert self.db is not None
         cursor = self.db.execute(
-            "INSERT INTO snapshots (name, description) VALUES (?, ?)",
+            "INSERT INTO snapshots (name, description, created_at) VALUES (?, ?, tv_now())",
             (name, description),
         )
         snapshot_id = cursor.lastrowid
@@ -620,8 +634,8 @@ class MetadataDB:
     ) -> int:
         assert self.db is not None
         cursor = self.db.execute(
-            """INSERT INTO events (action, path, version_id, object_hash)
-               VALUES (?, ?, ?, ?)""",
+            """INSERT INTO events (action, path, version_id, object_hash, created_at)
+               VALUES (?, ?, ?, ?, tv_now())""",
             (action, path, version_id, object_hash),
         )
         event_id = cursor.lastrowid
