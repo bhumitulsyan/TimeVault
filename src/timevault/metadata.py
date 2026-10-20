@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     parent_id INTEGER NOT NULL DEFAULT 1,
     name TEXT NOT NULL,
-    path TEXT UNIQUE NOT NULL,
+    path TEXT NOT NULL,
     is_dir BOOLEAN DEFAULT FALSE,
     current_version_id INTEGER,
     is_deleted BOOLEAN DEFAULT FALSE,
@@ -82,6 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_versions_file_id ON versions(file_id);
 CREATE INDEX IF NOT EXISTS idx_versions_object_hash ON versions(object_hash);
 CREATE INDEX IF NOT EXISTS idx_snapshot_entries_snapshot_id ON snapshot_entries(snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
+-- Only one LIVE file per path; deleted files keep their path so they can be restored
+CREATE UNIQUE INDEX IF NOT EXISTS idx_files_live_path ON files(path) WHERE is_deleted = FALSE;
 CREATE INDEX IF NOT EXISTS idx_files_parent ON files(parent_id, name);
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at, id);
 """
@@ -114,10 +116,61 @@ class MetadataDB:
 
     def initialize(self) -> None:
         assert self.db is not None, "Call connect() first"
+        self._migrate_unique_path()
         self.db.executescript(SCHEMA_SQL)
         self.db.execute(ROOT_INODE_SQL)
         self.db.execute(FORMAT_VERSION_SQL)
         self.db.commit()
+
+    def _migrate_unique_path(self) -> None:
+        """Upgrade storage created before the live-path fix.
+
+        Old databases declared ``files.path`` as UNIQUE, so a deleted file's
+        name could never be reused. Rebuild the table without that constraint;
+        the partial index in SCHEMA_SQL then enforces uniqueness for live files.
+        """
+        assert self.db is not None
+        has_files = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'"
+        ).fetchone()
+        old_unique = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' "
+            "AND tbl_name = 'files' AND name LIKE 'sqlite_autoindex_files%'"
+        ).fetchone()
+        if not has_files or not old_unique:
+            return
+
+        self.db.commit()
+        self.db.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self.db.executescript(
+                """
+                BEGIN;
+                CREATE TABLE files_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    parent_id INTEGER NOT NULL DEFAULT 1,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    is_dir BOOLEAN DEFAULT FALSE,
+                    current_version_id INTEGER,
+                    is_deleted BOOLEAN DEFAULT FALSE,
+                    mode INTEGER DEFAULT 33188,
+                    uid INTEGER DEFAULT 0,
+                    gid INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO files_new SELECT
+                    id, parent_id, name, path, is_dir, current_version_id, is_deleted,
+                    mode, uid, gid, created_at, updated_at
+                FROM files;
+                DROP TABLE files;
+                ALTER TABLE files_new RENAME TO files;
+                COMMIT;
+                """
+            )
+        finally:
+            self.db.execute("PRAGMA foreign_keys=ON")
 
     def close(self) -> None:
         if self.db:
@@ -167,7 +220,12 @@ class MetadataDB:
     def get_file_by_path(self, path: str, include_deleted: bool = False) -> sqlite3.Row | None:
         assert self.db is not None
         if include_deleted:
-            cursor = self.db.execute("SELECT * FROM files WHERE path = ?", (path,))
+            # Several deleted files can share a path: prefer the live one,
+            # otherwise the most recently created deleted one.
+            cursor = self.db.execute(
+                "SELECT * FROM files WHERE path = ? ORDER BY is_deleted ASC, id DESC LIMIT 1",
+                (path,),
+            )
         else:
             cursor = self.db.execute(
                 "SELECT * FROM files WHERE path = ? AND is_deleted = FALSE", (path,)
@@ -222,6 +280,17 @@ class MetadataDB:
 
     def set_file_deleted(self, inode: int, is_deleted: bool, *, commit: bool = True) -> None:
         assert self.db is not None
+        if not is_deleted:
+            # Un-deleting: if a newer live file now uses the same path, it gives way
+            # (soft-deleted, so its versions stay recoverable).
+            row = self.db.execute("SELECT path FROM files WHERE id = ?", (inode,)).fetchone()
+            if row is not None:
+                clash = self.db.execute(
+                    "SELECT id FROM files WHERE path = ? AND is_deleted = FALSE AND id != ?",
+                    (row["path"], inode),
+                ).fetchone()
+                if clash is not None:
+                    self.soft_delete_file(clash["id"], commit=False, action="REPLACED")
         self.db.execute(
             "UPDATE files SET is_deleted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (is_deleted, inode),
