@@ -30,7 +30,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           pytest tests/unit tests/integration tests/stress \
-            --cov=src/cowfs \
+            --cov=src/timevault \
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-fail-under=75
@@ -87,18 +87,18 @@ jobs:
           pip install -e .
 
       - name: CLI help works on Windows
-        run: cowfs --help
+        run: timevault --help
 
       - name: Mount command reports Linux-only
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force C:\temp\cowfs-storage | Out-Null
-          New-Item -ItemType Directory -Force C:\temp\cowfs-mnt | Out-Null
-          $stdout = Join-Path $env:RUNNER_TEMP "cowfs-mount-out.txt"
-          $stderr = Join-Path $env:RUNNER_TEMP "cowfs-mount-err.txt"
+          New-Item -ItemType Directory -Force C:\temp\timevault-storage | Out-Null
+          New-Item -ItemType Directory -Force C:\temp\timevault-mnt | Out-Null
+          $stdout = Join-Path $env:RUNNER_TEMP "timevault-mount-out.txt"
+          $stderr = Join-Path $env:RUNNER_TEMP "timevault-mount-err.txt"
           $proc = Start-Process `
-            -FilePath "cowfs" `
-            -ArgumentList @("mount", "C:\temp\cowfs-storage", "C:\temp\cowfs-mnt") `
+            -FilePath "timevault" `
+            -ArgumentList @("mount", "C:\temp\timevault-storage", "C:\temp\timevault-mnt") `
             -Wait `
             -PassThru `
             -NoNewWindow `
